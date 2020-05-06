@@ -50,8 +50,10 @@ class Broker {
 		  case Broker.CODE.OK:
 var response = JSON.parse(xhr.responseText);
 if (response.Status == Broker.STATUS.MATCH) {
+  log('client match');
   return fulfill(response.Offer); // Should contain offer.
 } else if (response.Status == Broker.STATUS.TIMEOUT) {
+  log('no match');
   return reject(Broker.MESSAGE.TIMEOUT);
 } else {
   log('Broker ERROR: Unexpected ' + response.Status);
@@ -59,7 +61,6 @@ if (response.Status == Broker.STATUS.MATCH) {
 }
 		  default:
 log('Broker ERROR: Unexpected ' + xhr.status + ' - ' + xhr.statusText);
-snowflake.ui.setStatus(' failure. Please refresh.');
 return reject(Broker.MESSAGE.UNEXPECTED);
 		}
 	  };
@@ -86,7 +87,6 @@ return reject(Broker.MESSAGE.UNEXPECTED);
 		  return dbg(xhr.responseText);
 		default:
 		  dbg('Broker ERROR: Unexpected ' + xhr.status + ' - ' + xhr.statusText);
-		  return snowflake.ui.setStatus(' failure. Please refresh.');
 	  }
 	};
 	var data = {"Version": "1.0", "Sid": id, "Answer": JSON.stringify(answer)};
@@ -259,15 +259,12 @@ class ProxyPair {
   prepareDataChannel(channel) {
 	channel.onopen = () => {
 	  log('WebRTC DataChannel opened!');
-	  snowflake.ui.setActive(true);
 	  // This is the point when the WebRTC datachannel is done, so the next step
 	  // is to establish websocket to the server.
 	  return this.connectRelay();
 	};
 	channel.onclose = () => {
 	  log('WebRTC DataChannel closed.');
-	  snowflake.ui.setStatus('disconnected by webrtc.');
-	  snowflake.ui.setActive(false);
 	  this.flush();
 	  return this.close();
 	};
@@ -302,12 +299,9 @@ class ProxyPair {
 		this.timer = 0;
 	  }
 	  log(relay.label + ' connected!');
-	  return snowflake.ui.setStatus('connected');
 	};
 	this.relay.onclose = () => {
 	  log(relay.label + ' closed.');
-	  snowflake.ui.setStatus('disconnected.');
-	  snowflake.ui.setActive(false);
 	  this.flush();
 	  return this.close();
 	};
@@ -441,11 +435,10 @@ TODO: More documentation
 class Snowflake {
 
   // Prepare the Snowflake with a Broker (to find clients) and optional UI.
-  constructor(config, ui, broker) {
+  constructor(config, broker) {
 	this.receiveOffer = this.receiveOffer.bind(this);
 
 	this.config = config;
-	this.ui = ui;
 	this.broker = broker;
 	this.proxyPairs = [];
 	if (void 0 === this.config.rateLimitBytes) {
@@ -490,7 +483,7 @@ class Snowflake {
 	if (this.retries > 0) {
 	  msg += '[retries: ' + this.retries + ']';
 	}
-	this.ui.setStatus(msg);
+
 	recv = this.broker.getClientOffer(pair.id);
 	recv.then((desc) => {
 	  if (!this.receiveOffer(pair, desc)) {
@@ -593,19 +586,6 @@ Snowflake.MESSAGE = {
 All of Snowflake's DOM manipulation and inputs.
 */
 
-class UI {
-
-  setStatus() {}
-
-  setActive(connected) {
-	return this.active = connected;
-  }
-
-  log() {}
-
-}
-
-UI.prototype.active = false;
 /* exported Util, Params, DummyRateLimit */
 
 /*
@@ -934,56 +914,8 @@ if (typeof module !== "undefined" && module !== null ? module.exports : void 0) 
 /* global Util, Params, Config, UI, Broker, Snowflake, Popup, Parse, availableLangs, WS */
 
 /*
-UI
-*/
-
-class BadgeUI extends UI {
-
-  constructor() {
-	super();
-  }
-
-  setStatus() {}
-
-  missingFeature(missing) {
-  }
-
-  turnOn() {
-	const clients = this.active ? 1 : 0;
-	if (clients > 0) {
-	  
-	} else {
-	  
-	}
-
-  }
-
-  turnOff() {
-  }
-
-  setActive(connected) {
-	super.setActive(connected);
-	this.turnOn();
-  }
-
-
-}
-
-BadgeUI.prototype.popup = null;
-
-
-/*
 Entry point.
 */
-
-// Defaults to opt-in.
-var COOKIE_NAME = "snowflake-allow";
-var COOKIE_LIFETIME = "Thu, 01 Jan 2038 00:00:00 GMT";
-var COOKIE_EXPIRE = "Thu, 01 Jan 1970 00:00:01 GMT";
-
-function setSnowflakeCookie(val, expires) {
-  document.cookie = `${COOKIE_NAME}=${val}; path=/; expires=${expires};`;
-}
 
 var debug, snowflake, config, broker, ui, log, dbg, init, update, silenceNotifications, query;
 
@@ -1007,16 +939,8 @@ var debug, snowflake, config, broker, ui, log, dbg, init, update, silenceNotific
   };
 
   update = function() {
-	const cookies = Parse.cookie(document.cookie);
-	if (cookies[COOKIE_NAME] !== '1') {
-	  ui.turnOff();
-	  snowflake.disable();
-	  log('Currently not active.');
-	  return;
-	}
 
 	if (!Util.hasWebRTC()) {
-	  ui.missingFeature(messages.getMessage('popupWebRTCOff'));
 	  snowflake.disable();
 	  return;
 	}
@@ -1024,14 +948,12 @@ var debug, snowflake, config, broker, ui, log, dbg, init, update, silenceNotific
 	WS.probeWebsocket(config.relayAddr)
 	.then(
 	  () => {
-		ui.turnOn();
 		dbg('Contacting Broker at ' + broker.url);
 		log('Starting snowflake');
 		snowflake.setRelayAddr(config.relayAddr);
 		snowflake.beginWebRTC();
 	  },
 	  () => {
-		ui.missingFeature(messages.getMessage('popupBridgeUnreachable'));
 		snowflake.disable();
 		log('Could not connect to bridge.');
 	  }
@@ -1039,10 +961,8 @@ var debug, snowflake, config, broker, ui, log, dbg, init, update, silenceNotific
   };
 
   init = function() {
-	ui = new BadgeUI();
 
 	if (!Util.hasCookies()) {
-	  ui.missingFeature(messages.getMessage('badgeCookiesOff'));
 	  return;
 	}
 
@@ -1051,24 +971,13 @@ var debug, snowflake, config, broker, ui, log, dbg, init, update, silenceNotific
 	  config.rateLimitBytes = Params.getByteCount(query, 'ratelimit', config.rateLimitBytes);
 	}
 	broker = new Broker(config);
-	snowflake = new Snowflake(config, ui, broker);
+	snowflake = new Snowflake(config, broker);
 	log('== snowflake proxy ==');
-	update();
-
-	setSnowflakeCookie('1', COOKIE_LIFETIME);
-	
 	update();
   };
 
   // Notification of closing tab with active proxy.
   window.onbeforeunload = function() {
-	if (
-	  !silenceNotifications &&
-	  snowflake !== null &&
-	  ui.active
-	) {
-	  return Snowflake.MESSAGE.CONFIRMATION;
-	}
 	return null;
   };
 
